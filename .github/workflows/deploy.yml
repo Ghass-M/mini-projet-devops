@@ -48,4 +48,4 @@ jobs:
           echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f Kubernetes/
+          kubectl apply -f kubernetes/
