@@ -31,21 +31,123 @@ jobs:
       - name: Push frontend image
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
-      # Remove or comment out the db push since it's just the standard postgres image
-      # - name: Tag and push db image
-      #   run: |
-      #     docker tag postgres:14 ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-db:14
-      #     docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-db:14
 
-  deploy:
+  test-kubernetes:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Set up Kubeconfig
+      
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: test-cluster
+          config: |
+            kind: Cluster
+            apiVersion: kind.x-k8s.io/v1alpha4
+            nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+              - |
+                kind: InitConfiguration
+                nodeRegistration:
+                  kubeletExtraArgs:
+                    node-labels: "ingress-ready=true"
+              extraPortMappings:
+              - containerPort: 30000
+                hostPort: 30000
+                protocol: TCP
+              - containerPort: 30001
+                hostPort: 30001
+                protocol: TCP
+
+      - name: Wait for cluster to be ready
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          kubectl wait --for=condition=Ready nodes --all --timeout=60s
+          kubectl cluster-info
+
+      - name: Load Docker images into Kind
+        run: |
+          # Pull the images we just pushed
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
+          
+          # Load them into the Kind cluster
+          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest --name test-cluster
+          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest --name test-cluster
+          kind load docker-image postgres:14 --name test-cluster
+
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f kubernetes/
+          echo "=== Deployments created ==="
+          kubectl get deployments
+          echo "=== Services created ==="
+          kubectl get services
+
+      - name: Wait for deployments to be ready
+        run: |
+          kubectl wait --for=condition=Available deployment/backend --timeout=120s
+          kubectl wait --for=condition=Available deployment/frontend --timeout=120s
+          kubectl wait --for=condition=Available deployment/postgres --timeout=120s
+
+      - name: Test application access
+        run: |
+          echo "=== Pod Status ==="
+          kubectl get pods -o wide
+          
+          echo "=== Service Status ==="
+          kubectl get services
+          
+          echo "=== Testing NodePort access ==="
+          # Get the NodePort for frontend service
+          FRONTEND_PORT=$(kubectl get service frontend-service -o jsonpath='{.spec.ports[0].nodePort}')
+          echo "Frontend NodePort: $FRONTEND_PORT"
+
+      - name: Test scalability
+        run: |
+          echo "=== Testing Backend Scalability ==="
+          echo "Current backend replicas:"
+          kubectl get deployment backend -o jsonpath='{.status.replicas}'
+          
+          echo "Scaling backend to 3 replicas..."
+          kubectl scale deployment backend --replicas=3
+          
+          echo "Waiting for scaling to complete..."
+          kubectl wait --for=condition=Available deployment/backend --timeout=60s
+          
+          echo "New backend replicas:"
+          kubectl get deployment backend -o jsonpath='{.status.readyReplicas}'
+          
+          echo "=== Backend pods after scaling ==="
+          kubectl get pods -l app=backend
+
+      - name: Test rolling update
+        run: |
+          echo "=== Testing Rolling Update ==="
+          echo "Current backend image:"
+          kubectl get deployment backend -o jsonpath='{.spec.template.spec.containers[0].image}'
+          
+          # Simulate image update by adding a tag
+          echo "Updating backend image..."
+          kubectl set image deployment/backend backend=${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
+          
+          echo "Waiting for rolling update to complete..."
+          kubectl rollout status deployment/backend --timeout=60s
+          
+          echo "Rolling update completed!"
+          kubectl get pods -l app=backend
+
+      - name: Final status check
+        run: |
+          echo "=== Final Cluster Status ==="
+          kubectl get all
+          
+          echo "=== Pod descriptions for debugging ==="
+          kubectl describe pods
+        if: always()
+
+      - name: Cleanup
+        run: |
+          kind delete cluster --name test-cluster
+        if: always()
