@@ -63,10 +63,15 @@ jobs:
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
           
+          # Pull postgres image
+          docker pull postgres:14
+          
           # Load them into the Kind cluster
           kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest --name test-cluster
           kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest --name test-cluster
           kind load docker-image postgres:14 --name test-cluster
+          
+          echo "=== Images loaded into Kind cluster ==="
 
       - name: Update Kubernetes manifests with correct image names
         run: |
