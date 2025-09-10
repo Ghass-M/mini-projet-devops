@@ -36,8 +36,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build images with docker compose
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           docker compose build
+          echo "=== Images after build ==="
+          docker images
+          echo "=== Docker compose images ==="
+          docker compose images
       - name: Tag and push backend image
         run: |
           docker tag flask-react-postgres_backend:latest ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
