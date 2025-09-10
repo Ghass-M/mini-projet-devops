@@ -134,12 +134,13 @@ jobs:
           echo "Current backend image:"
           kubectl get deployment backend -o jsonpath='{.spec.template.spec.containers[0].image}' || echo "Unknown"
           
-          # Force a rolling update by updating an annotation
+          # Force a rolling update by updating an annotation with a simple timestamp
           echo "Triggering rolling update..."
-          kubectl patch deployment backend -p '{"spec":{"template":{"metadata":{"annotations":{"rollout":"'$(date)'"}}}}}'
+          TIMESTAMP=$(date +%s)
+          kubectl patch deployment backend -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"rollout\":\"$TIMESTAMP\"}}}}}"
           
           echo "Waiting for rolling update to complete..."
-          kubectl rollout status deployment/backend --timeout=60s || echo "Rolling update timeout (expected)"
+          kubectl rollout status deployment/backend --timeout=60s
           
           echo "=== Backend pods after rolling update ==="
           kubectl get pods -l app=backend
