@@ -77,6 +77,13 @@ jobs:
           kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest --name test-cluster
           kind load docker-image postgres:14 --name test-cluster
 
+      - name: Update Kubernetes manifests with correct image names
+        run: |
+          # Replace placeholder with actual DockerHub username in all manifests
+          find kubernetes/ -name "*.yaml" -exec sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" {} \;
+          echo "Updated manifests:"
+          grep -r "image:" kubernetes/ || true
+
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f kubernetes/

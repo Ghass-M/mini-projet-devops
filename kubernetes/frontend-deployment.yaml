@@ -14,21 +14,10 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: frontend:latest
+        # Replace YOUR_DOCKERHUB_USERNAME with your actual username
+        image: nessim28/flask-react-postgres-frontend:latest
         ports:
-        - containerPort: 80
+        - containerPort: 3000
         env:
         - name: REACT_APP_API_URL
-          value: "http://backend:5000"
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 80
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 80
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          value: "http://backend-service:5000"
