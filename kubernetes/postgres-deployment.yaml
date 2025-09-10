@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: postgres
-        image: postgres:14
+        image: nessim28/flask-react-postgres-db:14
         ports:
         - containerPort: 5432
         env:
