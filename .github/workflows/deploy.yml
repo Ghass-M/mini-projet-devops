@@ -5,52 +5,69 @@ on:
     branches:
       - main
       - master
+  pull_request:
+    branches:
+      - main
+      - master
 
 jobs:
-  run-tests:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-
+          python-version: '3.9'
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install from requirements files if they exist
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
-
-      - name: Run pytest
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          # Install testing dependencies
+          pip install pytest pytest-cov flask
+          
+      - name: Run tests
         run: |
-          pytest -q tests
-          available fixtures: cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory
-  use 'pytest --fixtures [testpath]' for help on them.
+          # Run tests with coverage
+          pytest -v --cov=. --cov-report=term-missing
+          
+      - name: Upload coverage reports
+        if: success()
+        run: |
+          echo "Tests passed successfully!"
 
   build-and-push:
-    needs: run-tests
+    needs: test
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v5
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
       - name: Build images with docker compose
         run: |
           docker compose build
           echo "=== Images after build ==="
           docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}" | grep -E "(REPOSITORY|${{ secrets.DOCKERHUB_USERNAME }}|local)"
+          
       - name: Push backend image
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
+          
       - name: Push frontend image
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
@@ -58,6 +75,7 @@ jobs:
   test-kubernetes:
     needs: build-and-push
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v5
       
@@ -154,7 +172,7 @@ jobs:
       - name: Test rolling update
         run: |
           echo "=== Testing Rolling Update ==="
-          echo "Current backend image:" 
+          echo "Current backend image:"
           kubectl get deployment backend -o jsonpath='{.spec.template.spec.containers[0].image}' || echo "Unknown"
           
           # Force a rolling update by updating an annotation with a simple timestamp
