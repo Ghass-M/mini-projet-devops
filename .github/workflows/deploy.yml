@@ -9,7 +9,7 @@ on:
     branches:
       - main
       - master
-# added code block
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -43,12 +43,20 @@ jobs:
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v5
       
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "IMAGE_TAG=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "IMAGE_TAG=latest" >> $GITHUB_OUTPUT
+          fi
+          
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         
@@ -58,26 +66,45 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           
-      - name: Build images with docker compose
+      - name: Build and tag images
         run: |
+          # Build with docker compose first
           docker compose build
-          echo "=== Images after build ==="
-          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}" | grep -E "(REPOSITORY|${{ secrets.DOCKERHUB_USERNAME }}|local)"
+          
+          # Tag images with appropriate tag
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:${{ steps.tag.outputs.IMAGE_TAG }}
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:${{ steps.tag.outputs.IMAGE_TAG }}
+          
+          echo "=== Images after build and tag ==="
+          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}" | grep -E "(REPOSITORY|${{ secrets.DOCKERHUB_USERNAME }})"
           
       - name: Push backend image
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:${{ steps.tag.outputs.IMAGE_TAG }}
           
       - name: Push frontend image
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:${{ steps.tag.outputs.IMAGE_TAG }}
+          
+      - name: Output image tag for next job
+        id: output_tag
+        run: |
+          echo "image_tag=${{ steps.tag.outputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
 
   test-kubernetes:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v5
+      
+      - name: Get image tag from previous job
+        id: get_tag
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "IMAGE_TAG=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "IMAGE_TAG=latest" >> $GITHUB_OUTPUT
+          fi
       
       - name: Install Kind
         run: |
@@ -101,23 +128,24 @@ jobs:
       - name: Load Docker images into Kind
         run: |
           # Pull the images we just pushed
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:${{ steps.get_tag.outputs.IMAGE_TAG }}
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:${{ steps.get_tag.outputs.IMAGE_TAG }}
           
           # Pull postgres image
           docker pull postgres:14
           
           # Load them into the Kind cluster
-          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:latest --name test-cluster
-          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:latest --name test-cluster
+          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-backend:${{ steps.get_tag.outputs.IMAGE_TAG }} --name test-cluster
+          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/flask-react-postgres-frontend:${{ steps.get_tag.outputs.IMAGE_TAG }} --name test-cluster
           kind load docker-image postgres:14 --name test-cluster
           
           echo "=== Images loaded into Kind cluster ==="
 
-      - name: Update Kubernetes manifests with correct image names
+      - name: Update Kubernetes manifests with correct image names and tags
         run: |
-          # Replace placeholder with actual DockerHub username in all manifests
+          # Replace placeholder with actual DockerHub username and tag
           find kubernetes/ -name "*.yaml" -exec sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" {} \;
+          find kubernetes/ -name "*.yaml" -exec sed -i "s|:latest|:${{ steps.get_tag.outputs.IMAGE_TAG }}|g" {} \;
           echo "Updated manifests:"
           grep -r "image:" kubernetes/ || true
 
