@@ -26,6 +26,8 @@ jobs:
       - name: Run pytest
         run: |
           pytest -q tests
+          available fixtures: cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory
+  use 'pytest --fixtures [testpath]' for help on them.
 
   build-and-push:
     needs: run-tests
