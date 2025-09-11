@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import your Flask app - adjust this import based on your app structure
 try:
     from app import app  # If your Flask app is in app.py
-except ImportError:
+except ImportError: 
     try:
         from main import app  # If your Flask app is in main.py
     except ImportError:
